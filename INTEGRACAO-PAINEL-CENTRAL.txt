@@ -1,0 +1,17 @@
+INTEGRACAO COM O PAINEL 3.0 — WEB RADIO VEM COMIGO DEUS
+
+Este projeto continua sendo a Radio Pop Gospel independente. O site público, as músicas, as playlists e o armazenamento não são misturados com a Web Rádio Vem Comigo Deus.
+
+Para permitir que o painel central controle a biblioteca do Pop Gospel:
+
+1. No serviço Radio Pop Gospel do Render, configure POP_GOSPEL_PANEL_TOKEN com um segredo longo e aleatório.
+2. No serviço Web Rádio Vem Comigo Deus do Render, configure POP_GOSPEL_PANEL_TOKEN com exatamente o mesmo segredo.
+3. No serviço Web Rádio Vem Comigo Deus, configure POP_GOSPEL_API_URL com a URL pública do serviço Radio Pop Gospel, sem barra no final.
+4. Mantenha RADIO_ADMIN_TOKEN no serviço Web Rádio Vem Comigo Deus. É o token que o painel central já usa.
+5. Publique também o pacote Painel-Central-Pop-Gospel-Integracao.zip no repositório Webradiovemcomigodeus, seguindo o LEIA-ME-INTEGRACAO.txt desse pacote.
+
+O servidor Pop Gospel aceita o token central no cabeçalho x-pop-gospel-token, mas mantém o login local antigo como alternativa.
+
+O que a aba Pop Gospel do painel central gerencia: upload de MP3, biblioteca, criação/edição/exclusão de playlists, seleção da playlist pública e frase de destaque.
+
+Observação: esta integração não configura um segundo encoder Icecast. A transmissão ao vivo do Pop Gospel para um mount próprio deve ser configurada separadamente com os dados do servidor de streaming.
