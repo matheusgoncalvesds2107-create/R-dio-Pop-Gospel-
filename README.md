@@ -27,3 +27,7 @@ Importante:
 Esta atualização melhora o player de músicas sob demanda e a integração com as playlists. Ela não configura, por si só, uma transmissão contínua por encoder/Icecast. O status do player só mostra NO AR quando a configuração live do servidor estiver marcada como verdadeira.
 
 Não altere nem apague a pasta de dados persistentes do Render: é nela que ficam a biblioteca e os arquivos enviados, conforme DATA_DIR.
+
+
+OBSERVAÇÃO SOBRE O PLANO SEM DISCO PAGO
+Esta configuração usa o plano Free do Render e não cria disco persistente. A transmissão ao vivo recebida do painel do PC funciona sem armazenar o áudio no servidor. Os MP3 enviados pelo painel web e o banco local ficam no armazenamento temporário do serviço e podem desaparecer após reinício, novo deploy ou manutenção. Para manter uma biblioteca de MP3 enviada pelo site de forma permanente será necessário um armazenamento persistente separado.

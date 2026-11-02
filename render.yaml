@@ -2,14 +2,10 @@ services:
   - type: web
     name: radio-pop-gospel
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
-    disk:
-      name: radio-pop-gospel-data
-      mountPath: /var/data
-      sizeGB: 10
     envVars:
       - key: NODE_ENV
         value: production
@@ -21,8 +17,6 @@ services:
         generateValue: true
       - key: POP_GOSPEL_PANEL_TOKEN
         sync: false
-      - key: DATA_DIR
-        value: /var/data
       - key: PUBLIC_RADIO_NAME
         value: Radio Pop Gospel
       - key: PARTNER_NAME

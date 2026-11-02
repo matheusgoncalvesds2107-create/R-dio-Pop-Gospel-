@@ -1,0 +1,26 @@
+RADIO POP GOSPEL — TRANSMISSÃO AO VIVO PELO PAINEL DO PC
+
+O servidor agora aceita um segundo sinal independente do painel do PC:
+- WebSocket de entrada: /source-ws
+- Token no cabeçalho: x-pop-gospel-token
+- Áudio público ao vivo: /live.mp3
+- Estado: /api/health e /api/public
+
+PUBLICAÇÃO NO RENDER
+1. Atualize no repositório da Radio Pop Gospel os arquivos server.js, app.js e package.json.
+2. No serviço radiopopgospel do Render, configure a variável POP_GOSPEL_PANEL_TOKEN com um segredo longo e aleatório.
+3. Mantenha as demais variáveis de produção existentes (incluindo ADMIN_PASSWORD e SESSION_SECRET).
+4. Faça deploy e confirme /api/health. O campo live ficará false até o painel conectar.
+
+PAINEL DO PC
+1. Extraia o pacote atualizado do Painel do PC.
+2. Na aba Transmissão, mantenha as configurações atuais da Vem Comigo Deus sem alterações.
+3. Na seção Radio Pop Gospel, informe a mesma URL pública e o mesmo POP_GOSPEL_PANEL_TOKEN configurado no Render.
+4. Escolha uma pasta separada com os louvores da Pop Gospel e salve.
+5. Inicie primeiro a Vem Comigo Deus e depois a Radio Pop Gospel. Os dois motores têm botões e conexões separados.
+
+IMPORTANTE
+- A transmissão Pop Gospel usa o áudio da pasta local escolhida no PC, em ordem alfabética, repetindo a lista.
+- O site da Pop Gospel passa a priorizar o sinal ao vivo quando o transmissor estiver conectado; as playlists continuam disponíveis para reprodução individual.
+- Não é necessário contratar disco persistente para o sinal ao vivo. O armazenamento dos MP3 enviados ao servidor continua sujeito às regras do armazenamento atual do Render.
+- O serviço principal da Vem Comigo Deus e sua configuração de transmissão não são modificados por esta atualização.

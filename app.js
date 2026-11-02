@@ -7,12 +7,11 @@ const state = {
   index: -1,
   currentId: null,
   live: false,
-  isLive: true
+  liveMode: false,
+  liveStreamUrl: '/live.mp3'
 };
 
 const audio = $('audio');
-const API_BASE = `${location.origin}/pop-gospel/api`;
-const STREAM_URL = `${location.origin}/pop-gospel/radio.mp3`;
 
 function escapeHTML(value = '') {
   return String(value).replace(/[&<>"']/g, char => ({
@@ -30,9 +29,9 @@ function setMessage(message = '') {
 }
 
 function setStatus() {
-  $('status').textContent = state.live
-    ? 'NO AR • TRANSMISSÃO AO VIVO'
-    : 'PLAYER ONLINE • AGUARDANDO SINAL';
+  $('status').textContent = state.live && state.liveMode
+    ? 'AO VIVO • PLAYER ONLINE'
+    : (state.live ? 'SINAL AO VIVO DISPONÍVEL • PLAYLISTS' : 'PLAYER ONLINE • PLAYLISTS');
 }
 
 function selectedPlaylist() {
@@ -102,9 +101,9 @@ function renderTracks() {
 
 function syncPlayerLabels() {
   $('elapsed').textContent = formatTime(audio.currentTime);
-  $('duration').textContent = state.isLive ? 'AO VIVO' : formatTime(audio.duration);
-  $('seek').value = !state.isLive && audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
-  $('seek').disabled = state.isLive || !Number.isFinite(audio.duration) || audio.duration <= 0;
+  $('duration').textContent = formatTime(audio.duration);
+  $('seek').value = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
+  $('seek').disabled = !Number.isFinite(audio.duration) || audio.duration <= 0;
   $('play').textContent = audio.paused ? '▶' : 'Ⅱ';
   $('play').setAttribute('aria-label', audio.paused ? 'Reproduzir' : 'Pausar');
   $('play').title = audio.paused ? 'Reproduzir' : 'Pausar';
@@ -113,12 +112,12 @@ function syncPlayerLabels() {
 }
 
 function stopAndClear(message) {
+  state.liveMode = false;
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
   state.currentId = null;
   state.index = -1;
-  state.isLive = false;
   $('track-title').textContent = 'Escolha uma música';
   $('track-artist').textContent = 'A programação começa aqui';
   setMessage(message || '');
@@ -147,6 +146,8 @@ function buildQueue(preserveCurrent = true) {
 }
 
 async function selectTrack(index, autoplay = true) {
+  state.liveMode = false;
+  setStatus();
   if (!state.queue.length) {
     setMessage('Não há músicas nesta playlist.');
     return;
@@ -156,9 +157,8 @@ async function selectTrack(index, autoplay = true) {
   const track = state.queue[nextIndex];
   state.index = nextIndex;
   state.currentId = track.id;
-  state.isLive = false;
   audio.pause();
-  audio.src = `${API_BASE}/audio/${encodeURIComponent(track.id)}`;
+  audio.src = `/api/audio/${encodeURIComponent(track.id)}`;
   audio.load();
 
   $('track-title').textContent = track.title || 'Faixa sem título';
@@ -180,34 +180,86 @@ async function selectTrack(index, autoplay = true) {
 async function load() {
   $('tracks').innerHTML = '<div class="loading-state"><span class="loader"></span><p>Carregando a programação...</p></div>';
   try {
-    const response = await fetch(`${API_BASE}/public`, { cache: 'no-store' });
+    const response = await fetch('/api/public', { cache: 'no-store' });
     if (!response.ok) throw new Error('Não foi possível acessar a programação.');
     const data = await response.json();
 
     state.tracks = Array.isArray(data.tracks) ? data.tracks : [];
     state.playlists = Array.isArray(data.playlists) ? data.playlists : [];
     state.live = data.live === true;
+    state.liveStreamUrl = data.liveStreamUrl || '/live.mp3';
 
     $('tagline').textContent = data.tagline || 'Louvor que toca o coração';
     updatePlaylistOptions(data.selectedPlaylistId || 'all');
-    setStatus();
-    buildQueue(false);
+    state.queue = getVisibleTracks();
+    renderTracks();
 
-    state.isLive = true;
-    state.currentId = null;
-    audio.pause();
-    audio.src = STREAM_URL;
-    audio.load();
-    $('track-title').textContent = 'Radio Pop Gospel • AO VIVO';
-    $('track-artist').textContent = 'Uma nova vibe. A mesma fé.';
-    setMessage(state.live ? 'Conectado à transmissão ao vivo.' : 'Aguardando o sinal ao vivo.');
-    syncPlayerLabels();
+    if (state.live) {
+      state.liveMode = true;
+      state.currentId = '__live__';
+      state.index = -1;
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      $('track-title').textContent = data.liveTrack?.title || 'Radio Pop Gospel • Ao Vivo';
+      $('track-artist').textContent = 'Ao vivo • Radio Pop Gospel';
+      setMessage('A rádio está no ar. Toque em reproduzir para ouvir ao vivo.');
+      setStatus();
+      syncPlayerLabels();
+    } else {
+      state.liveMode = false;
+      state.currentId = null;
+      buildQueue(false);
+      if (state.queue.length) {
+        $('track-title').textContent = 'Escolha uma música';
+        $('track-artist').textContent = 'A programação começa aqui';
+        setMessage(`${state.tracks.length} música(s) disponível(is).`);
+      }
+      setStatus();
+    }
   } catch (error) {
     $('tracks').innerHTML = `<div class="error-state">${escapeHTML(error.message || 'Não foi possível carregar a programação.')}</div>`;
     $('playlist-select').innerHTML = '<option value="all">Programação indisponível</option>';
     setMessage('Verifique a conexão com a rádio e tente novamente.');
     $('status').textContent = 'CONECTANDO À RÁDIO';
   }
+}
+async function refreshLiveStatus() {
+  try {
+    const response = await fetch('/api/public', { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json();
+    const nextLive = data.live === true;
+    state.liveStreamUrl = data.liveStreamUrl || '/live.mp3';
+    if (nextLive === state.live) {
+      if (state.liveMode && data.liveTrack?.title) $('track-title').textContent = data.liveTrack.title;
+      return;
+    }
+    state.live = nextLive;
+    if (nextLive && !state.currentId) {
+      state.liveMode = true;
+      state.currentId = '__live__';
+      state.index = -1;
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      $('track-title').textContent = data.liveTrack?.title || 'Radio Pop Gospel • Ao Vivo';
+      $('track-artist').textContent = 'Ao vivo • Radio Pop Gospel';
+      setMessage('A rádio entrou no ar. Toque em reproduzir para ouvir ao vivo.');
+    } else if (!nextLive && state.liveMode) {
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      state.liveMode = false;
+      state.currentId = null;
+      $('track-title').textContent = 'Escolha uma música';
+      $('track-artist').textContent = 'A programação começa aqui';
+      setMessage('O sinal ao vivo foi encerrado. Você pode ouvir as playlists.');
+      buildQueue(false);
+    }
+    setStatus();
+    syncPlayerLabels();
+  } catch {}
 }
 
 $('tracks').addEventListener('click', event => {
@@ -226,6 +278,11 @@ $('tracks').addEventListener('click', event => {
 });
 
 $('playlist-select').addEventListener('change', () => {
+  if (state.liveMode) {
+    state.queue = getVisibleTracks();
+    renderTracks();
+    return;
+  }
   const oldId = state.currentId;
   const wasPlaying = !audio.paused;
   buildQueue(true);
@@ -237,8 +294,9 @@ $('playlist-select').addEventListener('change', () => {
 });
 
 $('play').addEventListener('click', () => {
-  if (state.isLive) {
-    if (audio.paused) audio.play().catch(() => setMessage('A transmissão ainda não está disponível. Tente novamente em instantes.'));
+  if (state.liveMode) {
+    if (!audio.src) audio.src = state.liveStreamUrl;
+    if (audio.paused) audio.play().catch(() => setMessage('Não foi possível conectar ao sinal ao vivo. Tente novamente em instantes.'));
     else audio.pause();
     return;
   }
@@ -256,17 +314,17 @@ $('play').addEventListener('click', () => {
 });
 
 $('prev').addEventListener('click', () => {
-  if (state.queue.length) selectTrack(state.index <= 0 ? state.queue.length - 1 : state.index - 1, true);
+  if (!state.liveMode && state.queue.length) selectTrack(state.index <= 0 ? state.queue.length - 1 : state.index - 1, true);
 });
 
 $('next').addEventListener('click', () => {
-  if (state.queue.length) selectTrack(state.index + 1, true);
+  if (!state.liveMode && state.queue.length) selectTrack(state.index + 1, true);
 });
 
 audio.addEventListener('play', () => { setMessage(''); syncPlayerLabels(); });
 audio.addEventListener('pause', syncPlayerLabels);
 audio.addEventListener('ended', () => {
-  if (state.queue.length) selectTrack(state.index + 1, true);
+  if (!state.liveMode && state.queue.length) selectTrack(state.index + 1, true);
 });
 audio.addEventListener('timeupdate', syncPlayerLabels);
 audio.addEventListener('loadedmetadata', syncPlayerLabels);
@@ -274,7 +332,7 @@ audio.addEventListener('durationchange', syncPlayerLabels);
 audio.addEventListener('waiting', () => setMessage('Carregando áudio...'));
 audio.addEventListener('playing', () => setMessage(''));
 audio.addEventListener('error', () => {
-  if (state.isLive) setMessage('A transmissão ao vivo está reconectando.');
+  if (state.liveMode) setMessage('Sinal ao vivo indisponível no momento. A rádio pode estar reconectando.');
   else if (state.currentId) setMessage('Não foi possível carregar esta música. Verifique o arquivo no painel.');
   syncPlayerLabels();
 });
@@ -292,7 +350,5 @@ $('seek').addEventListener('change', () => {
 $('volume').addEventListener('input', () => { audio.volume = Number($('volume').value); });
 audio.volume = Number($('volume').value);
 
-async function refreshLiveStatus(){try{const r=await fetch(`${API_BASE}/status`,{cache:'no-store'});if(!r.ok)return;const d=await r.json();state.live=!!d.onAir;setStatus();if(state.isLive&&d.currentTrack)$('track-title').textContent=d.currentTrack.includes('AO VIVO')?'Radio Pop Gospel • AO VIVO':d.currentTrack;}catch{}}
-
 load();
-setInterval(refreshLiveStatus,15000);
+setInterval(refreshLiveStatus, 12000);

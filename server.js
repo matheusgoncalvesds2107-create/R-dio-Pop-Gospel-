@@ -5,6 +5,8 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const http = require('http');
+const { WebSocketServer, WebSocket } = require('ws');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +22,11 @@ const PANEL_API_TOKEN = process.env.POP_GOSPEL_PANEL_TOKEN || '';
 
 const RADIO_NAME = process.env.PUBLIC_RADIO_NAME || 'Radio Pop Gospel';
 const PARTNER_NAME = process.env.PARTNER_NAME || 'Web Rádio Vem Comigo Deus';
+
+// Sinal ao vivo independente enviado pelo painel do PC.
+let activeSource = null;
+let liveTrackTitle = '';
+const streamListeners = new Set();
 
 if (process.env.NODE_ENV === 'production' && (!ADMIN_PASSWORD || !SESSION_SECRET)) {
   console.error('Configure ADMIN_PASSWORD e SESSION_SECRET nas variáveis de ambiente.');
@@ -89,6 +96,24 @@ function hasCentralPanelToken(req) {
   const a = Buffer.from(provided);
   const b = Buffer.from(PANEL_API_TOKEN);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function hasValidSourceToken(value) {
+  const provided = String(value || '');
+  if (!PANEL_API_TOKEN || !provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(PANEL_API_TOKEN);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function setLiveStatus(live) {
+  try {
+    const db = readDB();
+    db.settings.live = Boolean(live);
+    writeDB(db);
+  } catch (error) {
+    console.error('Não foi possível atualizar o estado ao vivo:', error.message);
+  }
 }
 
 function isAdmin(req, res, next) {
@@ -197,7 +222,9 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     service: 'radio-pop-gospel',
-    centralPanel: Boolean(PANEL_API_TOKEN)
+    centralPanel: Boolean(PANEL_API_TOKEN),
+    live: Boolean(activeSource && activeSource.readyState === WebSocket.OPEN),
+    listeners: streamListeners.size
   });
 });
 
@@ -211,7 +238,9 @@ app.get('/api/public', (_req, res) => {
     name: RADIO_NAME,
     partner: PARTNER_NAME,
     tagline: db.settings.tagline,
-    live: !!db.settings.live,
+    live: Boolean(activeSource && activeSource.readyState === WebSocket.OPEN),
+    liveStreamUrl: '/live.mp3',
+    liveTrack: liveTrackTitle ? { title: liveTrackTitle } : null,
 
     tracks: db.tracks.map(safeTrack),
 
@@ -252,6 +281,22 @@ app.get('/api/audio/:id', (req, res) => {
   res.setHeader('Accept-Ranges', 'bytes');
 
   res.sendFile(file);
+});
+
+// TRANSMISSÃO AO VIVO: áudio enviado pelo segundo motor do painel do PC.
+app.get('/live.mp3', (req, res) => {
+  if (!activeSource || activeSource.readyState !== WebSocket.OPEN) {
+    return res.status(503).type('text/plain').send('Radio Pop Gospel fora do ar.');
+  }
+  res.status(200);
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.flushHeaders?.();
+  streamListeners.add(res);
+  const remove = () => streamListeners.delete(res);
+  res.on('close', remove);
 });
 
 // LOGIN ADMINISTRATIVO
@@ -554,8 +599,62 @@ app.use((err, _req, res, _next) => {
 
 // INICIAR SERVIDOR
 
-app.listen(PORT, () => {
-  console.log(
-    `${RADIO_NAME} online na porta ${PORT}`
-  );
+const server = http.createServer(app);
+const sourceWss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: 2 * 1024 * 1024 });
+
+server.on('upgrade', (req, socket, head) => {
+  let pathname = '';
+  try { pathname = new URL(req.url, 'http://localhost').pathname; } catch {}
+  if (pathname !== '/source-ws') return socket.destroy();
+  if (!hasValidSourceToken(req.headers['x-pop-gospel-token'])) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    return socket.destroy();
+  }
+  sourceWss.handleUpgrade(req, socket, head, ws => sourceWss.emit('connection', ws, req));
+});
+
+sourceWss.on('connection', ws => {
+  if (activeSource && activeSource.readyState === WebSocket.OPEN) {
+    ws.close(1013, 'Já existe um transmissor conectado.');
+    return;
+  }
+  activeSource = ws;
+  liveTrackTitle = '';
+  setLiveStatus(true);
+  console.log('Transmissor da Radio Pop Gospel conectado.');
+  ws.on('message', (chunk, isBinary) => {
+    if (activeSource !== ws) return;
+    if (!isBinary) {
+      try {
+        const meta = JSON.parse(chunk.toString());
+        if (meta.type === 'metadata') liveTrackTitle = String(meta.title || '').slice(0, 180);
+      } catch {}
+      return;
+    }
+    for (const listener of streamListeners) {
+      if (listener.destroyed || listener.writableEnded) {
+        streamListeners.delete(listener);
+        continue;
+      }
+      // Evita acumular memória se um ouvinte tiver uma conexão lenta.
+      if (listener.writableLength > 1024 * 1024) continue;
+      try { listener.write(chunk); } catch { streamListeners.delete(listener); }
+    }
+  });
+  ws.on('close', () => {
+    if (activeSource !== ws) return;
+    activeSource = null;
+    liveTrackTitle = '';
+    setLiveStatus(false);
+    for (const listener of streamListeners) {
+      try { listener.end(); } catch {}
+    }
+    streamListeners.clear();
+    console.log('Transmissor da Radio Pop Gospel desconectado.');
+  });
+  ws.on('error', error => console.error('WebSocket Pop Gospel:', error.message));
+});
+
+server.listen(PORT, () => {
+  console.log(`${RADIO_NAME} online na porta ${PORT}`);
 });
